@@ -1,15 +1,38 @@
 {
-  "name": "pi-notetaker",
-  "private": true,
+  "name": "@dvrosalesm/pi-notetaker",
   "version": "1.0.0",
+  "description": "pi extension for meeting notes — record, transcribe locally with Whisper, and summarize with LLM",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dvrosalesm/pi-notetaker"
+  },
+  "keywords": [
+    "pi",
+    "pi-extension",
+    "meeting",
+    "notetaker",
+    "whisper",
+    "transcription"
+  ],
   "pi": {
     "extensions": ["./src/index.ts"]
   },
+  "files": [
+    "src/",
+    "package.json",
+    "README.md"
+  ],
   "scripts": {
     "clean": "echo 'nothing to clean'",
     "build": "echo 'nothing to build'",
     "check": "echo 'nothing to check'"
   },
-  "dependencies": {}
+  "dependencies": {},
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  }
 }

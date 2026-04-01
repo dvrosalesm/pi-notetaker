@@ -9,11 +9,20 @@ Works with **any pi agent** (standalone pi, [cmd0](https://github.com/dvrosalesm
 ## Quick Install
 
 ```bash
-# 1. Copy or symlink this directory into pi's extensions
+# Install from npm
+pi install npm:@dvrosalesm/pi-notetaker
+
+# Then inside a pi session, run:
+/meeting setup
+```
+
+### Install from source
+
+```bash
+# Copy or symlink this directory into pi's extensions
 cp -r pi-notetaker ~/.pi/agent/extensions/pi-notetaker
 
-# 2. Install dependencies automatically
-#    Inside a pi session, run:
+# Then inside a pi session, run:
 /meeting setup
 ```
 
