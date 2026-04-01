@@ -1,8 +1,10 @@
 # pi-notetaker
 
+Built for [cmd0](https://github.com/dvrosalesm/cmd0) — a desktop AI agent that lives in your system tray.
+
 A [pi](https://github.com/mario-zechner/pi-coding-agent) extension for meeting notes. Record audio, transcribe it locally with Whisper, and generate structured summaries using the active pi LLM — all offline, all local.
 
-Works with **any pi agent** (standalone pi, cmd0, or custom SDK apps).
+Works with **any pi agent** (standalone pi, [cmd0](https://github.com/dvrosalesm/cmd0), or custom SDK apps).
 
 ## Quick Install
 
