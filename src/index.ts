@@ -9,18 +9,20 @@
  *   /meeting list            — List past meetings
  *   /meeting view <id>       — View a meeting's summary
  *   /meeting transcript <id> — View raw transcript
- *   /meeting setup           — Check & install dependencies
+ *   /meeting delete <id>     — Delete a meeting
+ *   /meeting setup           — Check dependencies
  *   /meeting status          — Check recording status
  *   /meeting config          — Show/set configuration
+ *   /meeting help            — Show help
  *
  * Tools (LLM-callable):
- *   meeting_setup, meeting_start, meeting_stop, meeting_status, meeting_list, meeting_view
+ *   meeting_setup, meeting_start, meeting_stop, meeting_status, meeting_list, meeting_view, meeting_delete
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import * as crypto from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "@sinclair/typebox";
@@ -163,10 +165,6 @@ function which(bin: string): boolean {
   }
 }
 
-function hasBrew(): boolean {
-  return which("brew");
-}
-
 const WHISPER_BINARIES = ["whisper-cli", "whisper-cpp", "whisper"] as const;
 
 function checkDeps(config: MeetingConfig): DepStatus[] {
@@ -180,16 +178,20 @@ function checkDeps(config: MeetingConfig): DepStatus[] {
     detail: hasSox ? "sox (rec)" : hasFfmpeg ? "ffmpeg" : "missing — need sox or ffmpeg",
   });
 
-  const hasWhisperCli = WHISPER_BINARIES.some(which);
+  const customBin = config.whisperBin || process.env.WHISPER_BIN;
+  const hasCustomBin = !!(customBin && which(customBin));
+  const hasWhisperCli = hasCustomBin || WHISPER_BINARIES.some(which);
   const hasWhisperApi = !!(config.whisperApiUrl || process.env.WHISPER_API_URL);
   deps.push({
     name: "transcriber",
     found: hasWhisperCli || hasWhisperApi,
-    detail: hasWhisperCli
-      ? WHISPER_BINARIES.find(which)!
-      : hasWhisperApi
-        ? `API at ${config.whisperApiUrl || process.env.WHISPER_API_URL}`
-        : "missing — need whisper-cpp or a local whisper API",
+    detail: hasCustomBin
+      ? customBin!
+      : hasWhisperCli
+        ? WHISPER_BINARIES.find(which)!
+        : hasWhisperApi
+          ? `API at ${config.whisperApiUrl || process.env.WHISPER_API_URL}`
+          : "missing — need whisper-cpp or a local whisper API",
   });
 
   const modelPath = config.whisperModel || process.env.WHISPER_MODEL;
@@ -211,60 +213,6 @@ function checkDeps(config: MeetingConfig): DepStatus[] {
   }
 
   return deps;
-}
-
-async function installDeps(
-  deps: DepStatus[],
-  ctx: ExtensionContext,
-): Promise<{ installed: string[]; failed: string[] }> {
-  const installed: string[] = [];
-  const failed: string[] = [];
-  const brew = hasBrew();
-
-  for (const dep of deps) {
-    if (dep.found) continue;
-
-    if (dep.name === "recorder") {
-      if (!brew) { failed.push("recorder — Homebrew not found, install sox or ffmpeg manually"); continue; }
-      ctx.ui.setStatus("pi-notetaker", "Installing sox...");
-      try {
-        execSync("brew install sox", { stdio: "pipe", timeout: 120_000 });
-        installed.push("sox");
-      } catch {
-        try {
-          execSync("brew install ffmpeg", { stdio: "pipe", timeout: 180_000 });
-          installed.push("ffmpeg");
-        } catch {
-          failed.push("recorder (sox/ffmpeg)");
-        }
-      }
-    } else if (dep.name === "transcriber") {
-      if (!brew) { failed.push("transcriber — Homebrew not found, install whisper-cpp manually"); continue; }
-      ctx.ui.setStatus("pi-notetaker", "Installing whisper-cpp...");
-      try {
-        execSync("brew install whisper-cpp", { stdio: "pipe", timeout: 180_000 });
-        installed.push("whisper-cpp");
-      } catch {
-        failed.push("whisper-cpp");
-      }
-    } else if (dep.name === "whisper-model") {
-      ctx.ui.setStatus("pi-notetaker", "Downloading whisper model (base.en, ~142MB)...");
-      fs.mkdirSync(MODELS_DIR, { recursive: true });
-      const modelOut = path.join(MODELS_DIR, "ggml-base.en.bin");
-      try {
-        execFileSync("curl", ["-L", "-o", modelOut, WHISPER_MODEL_URL], {
-          stdio: "pipe",
-          timeout: 300_000,
-        });
-        installed.push("whisper model (base.en)");
-      } catch {
-        failed.push("whisper model");
-      }
-    }
-  }
-
-  ctx.ui.setStatus("pi-notetaker", "");
-  return { installed, failed };
 }
 
 // ── Shared meeting operations ───────────────────────────────────────
@@ -487,6 +435,16 @@ export default function (pi: ExtensionAPI) {
           return;
         }
 
+        case "delete": {
+          if (!rest) { ctx.ui.notify("Usage: /meeting delete <id or number>", "warning"); return; }
+          const meeting = findMeeting(rest);
+          if (!meeting) { ctx.ui.notify(`Meeting not found: ${rest}`, "error"); return; }
+          const meetingDir = path.join(MEETINGS_DIR, meeting.id);
+          fs.rmSync(meetingDir, { recursive: true, force: true });
+          ctx.ui.notify(`Deleted meeting: ${meeting.name}`, "info");
+          return;
+        }
+
         case "config": {
           if (!rest) {
             ctx.ui.notify(
@@ -512,24 +470,17 @@ export default function (pi: ExtensionAPI) {
 
           if (missing.length === 0) {
             ctx.ui.notify(`All dependencies installed:\n${statusText}`, "info");
-            return;
-          }
-
-          if (ctx.hasUI) {
-            const ok = await ctx.ui.confirm(
-              "Install dependencies?",
-              `Missing: ${missing.map((d) => d.name).join(", ")}. This will run brew install and download files.`,
+          } else {
+            ctx.ui.notify(
+              `Dependency check:\n${statusText}\n\n` +
+              "Install missing dependencies with your package manager:\n" +
+              "  macOS:  brew install sox ffmpeg whisper-cpp\n" +
+              "  Ubuntu: sudo apt install sox ffmpeg\n" +
+              "  Arch:   sudo pacman -S sox ffmpeg\n\n" +
+              `Whisper model: download a ggml model to ${MODELS_DIR}/`,
+              missing.length > 0 ? "warning" : "info",
             );
-            if (!ok) {
-              ctx.ui.notify(`Dependency check:\n${statusText}`, "info");
-              return;
-            }
           }
-
-          const { installed, failed } = await installDeps(missing, ctx);
-          if (installed.length > 0) ctx.ui.notify(`Installed: ${installed.join(", ")}`, "info");
-          if (failed.length > 0) ctx.ui.notify(`Failed: ${failed.join(", ")}`, "error");
-          if (failed.length === 0) ctx.ui.notify("All dependencies ready. Use /meeting start to begin.", "info");
           return;
         }
 
@@ -544,6 +495,7 @@ export default function (pi: ExtensionAPI) {
           return;
         }
 
+        case "help":
         default:
           ctx.ui.notify(
             "Usage: /meeting <subcommand>\n\n" +
@@ -552,9 +504,11 @@ export default function (pi: ExtensionAPI) {
             "  list               — List past meetings\n" +
             "  view <id>          — View meeting summary\n" +
             "  transcript <id>    — View raw transcript\n" +
-            "  setup              — Check & install dependencies\n" +
+            "  delete <id>        — Delete a meeting\n" +
+            "  setup              — Check dependencies\n" +
             "  status             — Check recording status\n" +
-            "  config [key val]   — Show/set configuration",
+            "  config [key val]   — Show/set configuration\n" +
+            "  help               — Show this help",
             "info",
           );
       }
@@ -721,21 +675,45 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  const SetupParams = Type.Object({
-    install: Type.Optional(
-      Type.Boolean({ description: "If true, auto-install missing deps. If false, just check. Default: true" }),
-    ),
+  const DeleteParams = Type.Object({
+    meeting: Type.String({ description: "Meeting ID, ID prefix, or list index number" }),
+  });
+
+  pi.registerTool({
+    name: "meeting_delete",
+    label: "Delete Meeting",
+    description: "Delete a past meeting and all its data (audio, transcript, summary) by ID or index number.",
+    parameters: DeleteParams,
+    async execute(_toolCallId, params) {
+      const { meeting: meetingRef } = params as Static<typeof DeleteParams>;
+
+      const meeting = findMeeting(meetingRef);
+      if (!meeting) {
+        return {
+          content: [{ type: "text", text: `Meeting not found: ${meetingRef}` }],
+          details: { status: "not_found" },
+        };
+      }
+
+      const meetingDir = path.join(MEETINGS_DIR, meeting.id);
+      fs.rmSync(meetingDir, { recursive: true, force: true });
+
+      return {
+        content: [{ type: "text", text: `Deleted meeting: "${meeting.name}" (${meeting.id})` }],
+        details: { status: "deleted", meetingId: meeting.id },
+      };
+    },
   });
 
   pi.registerTool({
     name: "meeting_setup",
-    label: "Setup Meeting Dependencies",
+    label: "Check Meeting Dependencies",
     description:
-      "Check and install all dependencies needed for meeting recording (sox/ffmpeg, whisper-cpp, whisper model). " +
-      "Run this before the first meeting or if any dependency is missing.",
-    parameters: SetupParams,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const { install: doInstall } = params as Static<typeof SetupParams>;
+      "Check all dependencies needed for meeting recording (sox/ffmpeg, whisper-cpp, whisper model). " +
+      "Reports what is installed and what is missing. The agent should install missing dependencies " +
+      "using the appropriate system package manager (brew on macOS, apt/pacman/etc on Linux).",
+    parameters: Type.Object({}),
+    async execute() {
       const deps = checkDeps(config);
       const missing = deps.filter((d) => !d.found);
 
@@ -750,27 +728,21 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      if (doInstall === false) {
-        return {
-          content: [
-            { type: "text", text: `Missing dependencies:\n${statusLines.join("\n")}\n\nCall meeting_setup with install=true to install them.` },
-          ],
-          details: { status: "missing", missing: missing.map((d) => d.name) },
-        };
-      }
-
-      const { installed, failed } = await installDeps(missing, ctx);
-
-      const resultLines = [
-        ...statusLines,
-        "",
-        installed.length > 0 ? `Installed: ${installed.join(", ")}` : null,
-        failed.length > 0 ? `Failed: ${failed.join(", ")}` : null,
-      ].filter((l): l is string => l !== null);
-
       return {
-        content: [{ type: "text", text: resultLines.join("\n") }],
-        details: { status: failed.length === 0 ? "ready" : "partial", installed, failed },
+        content: [
+          {
+            type: "text",
+            text:
+              `Missing dependencies:\n${statusLines.join("\n")}\n\n` +
+              "Install with the appropriate package manager:\n" +
+              "  macOS:  brew install sox ffmpeg whisper-cpp\n" +
+              "  Ubuntu: sudo apt install sox ffmpeg\n" +
+              "  Arch:   sudo pacman -S sox ffmpeg\n\n" +
+              `Whisper model: download a ggml model to ${MODELS_DIR}/\n` +
+              `  curl -L -o ${MODELS_DIR}/ggml-base.en.bin ${WHISPER_MODEL_URL}`,
+          },
+        ],
+        details: { status: "missing", missing: missing.map((d) => d.name) },
       };
     },
   });

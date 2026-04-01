@@ -77,7 +77,7 @@ async function transcribeWithCli(opts: TranscribeOptions): Promise<string> {
   const binary = opts.binaryPath || detectCliBinary();
   if (!binary) {
     throw new Error(
-      "whisper-cli not found. Install whisper.cpp:\n  brew install whisper-cpp\nOr set WHISPER_BIN environment variable.",
+      "whisper-cli not found. Install whisper.cpp or set WHISPER_BIN environment variable.",
     );
   }
 
@@ -85,7 +85,7 @@ async function transcribeWithCli(opts: TranscribeOptions): Promise<string> {
   if (!model) {
     throw new Error(
       "No whisper model found. Download one:\n" +
-      "  mkdir -p ~/.cmd0/models && curl -L -o ~/.cmd0/models/ggml-base.en.bin \\\n" +
+      "  mkdir -p ~/.pi/models && curl -L -o ~/.pi/models/ggml-base.en.bin \\\n" +
       "    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
     );
   }

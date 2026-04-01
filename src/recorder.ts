@@ -98,7 +98,7 @@ export function start(opts: RecorderOptions): { ok: true } | { ok: false; error:
   if (!backend) {
     return {
       ok: false,
-      error: "Neither sox (rec) nor ffmpeg found. Install one:\n  brew install sox\n  brew install ffmpeg",
+      error: "Neither sox (rec) nor ffmpeg found. Install one using your system package manager.",
     };
   }
 
